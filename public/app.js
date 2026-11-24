@@ -2,14 +2,37 @@
   'use strict';
 
   const ROLE_LABEL = { TOP: 'Top', JUNGLE: 'Jungle', MID: 'Mid', ADC: 'ADC', SUPPORT: 'Support' };
-  const ROLE_SHORT = { TOP: 'TOP', JUNGLE: 'JNG', MID: 'MID', ADC: 'ADC', SUPPORT: 'SUP' };
   const STATUS = {
-    in_progress: ['Probíhá', 'yellow'], awaiting_confirm: ['Čeká na potvrzení', 'yellow'],
-    disputed: ['Rozporováno', 'red'], finished: ['Dokončeno', 'green'], cancelled: ['Zrušeno', 'gray'],
+    in_progress: ['Probíhá', 'live'], awaiting_confirm: ['Čeká na potvrzení', 'warn'],
+    disputed: ['Rozporováno', 'bad'], finished: ['Dohráno', 'ok'], cancelled: ['Zrušeno', 'off'],
+  };
+
+  // ─────────── ikony ───────────
+  const svg = (inner) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${inner}</svg>`;
+  const FRAME = '<rect class="fr" x="3.5" y="3.5" width="17" height="17" rx="4"/>';
+  const ROLE_SVG = {
+    TOP: `${FRAME}<path d="M7.5 16.5v-9h9"/>`,
+    JUNGLE: `${FRAME}<path d="M12 7c-2.6 2.4-3.4 5.2-1.6 9M12 7c2.6 2.4 3.4 5.2 1.6 9M12 10.5v6"/>`,
+    MID: `${FRAME}<path d="M7.5 16.5l9-9"/>`,
+    ADC: `${FRAME}<path d="M7.5 16.5h9v-9"/>`,
+    SUPPORT: `${FRAME}<path d="M12 7.5l3.8 1.4v3c0 2.3-1.6 3.9-3.8 4.6-2.2-.7-3.8-2.3-3.8-4.6v-3z"/>`,
+  };
+  const roleIcon = (r, cls = '') => `<span class="ri ${cls}" title="${ROLE_LABEL[r] || r}" aria-label="${ROLE_LABEL[r] || r}">${svg(ROLE_SVG[r] || FRAME)}</span>`;
+  const IC = {
+    crown: svg('<path d="M4.5 17.5h15M5.5 14.5 4.5 7.5l5 3.5L12 5.5l2.5 5.5 5-3.5-1 7z"/>'),
+    copy: svg('<rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/>'),
+    out: svg('<path d="M14 4.5h3a2.5 2.5 0 0 1 2.5 2.5v10a2.5 2.5 0 0 1-2.5 2.5h-3M10 16l-4-4 4-4M6 12h9.5"/>'),
+    send: svg('<path d="M5 12h13M13 6l6 6-6 6"/>'),
+    star: svg('<path d="M12 4.5l2.3 4.7 5.2.8-3.8 3.6.9 5.1-4.6-2.4-4.6 2.4.9-5.1L4.5 10l5.2-.8z"/>'),
+    x: svg('<path d="M7 7l10 10M17 7 7 17"/>'),
+    plus: svg('<path d="M12 6v12M6 12h12"/>'),
+    check: svg('<path d="M5.5 12.5l4 4 9-9"/>'),
+    voice: svg('<path d="M4.5 14v-2a7.5 7.5 0 0 1 15 0v2"/><rect x="3.5" y="13" width="4" height="6.5" rx="1.5"/><rect x="16.5" y="13" width="4" height="6.5" rx="1.5"/>'),
+    upload: svg('<path d="M12 16V5M7 10l5-5 5 5M5 19h14"/>'),
   };
 
   const S = {
-    me: null, accounts: [], status: null, config: null, queue: null, timeOffset: 0,
+    me: null, accounts: [], status: null, config: null, queue: null, timeOffset: 0, seen: null,
     ready: null, draft: null, draftId: null, chat: { all: [], team: [] }, chatTab: 'all', matchId: null,
   };
   const socket = io();
@@ -22,15 +45,31 @@
   const syncTime = (serverNow) => { if (serverNow) S.timeOffset = serverNow - Date.now(); };
   const fmtDur = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
   const fmtDate = (ts) => new Date(ts).toLocaleString('cs-CZ', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const roleTag = (r) => `<span class="role-tag">${ROLE_SHORT[r] || esc(r)}</span>`;
-  const sideBadge = (s) => (s ? `<span class="badge ${s === 'BLUE' ? 'blue' : 'red'}">${s}</span>` : '');
-  const statusBadge = (s) => `<span class="badge ${STATUS[s]?.[1] || 'gray'}">${STATUS[s]?.[0] || esc(s)}</span>`;
+  const sideName = (s) => (s === 'BLUE' ? 'Blue' : 'Red');
+  const sideChip = (s) => (s ? `<span class="chip-s ${s === 'BLUE' ? 'blue' : 'red'}">${sideName(s)}</span>` : '');
+  const statusChip = (s) => `<span class="chip-s ${STATUS[s]?.[1] || 'off'}">${STATUS[s]?.[0] || esc(s)}</span>`;
+  const delta = (n) => `<span class="${n >= 0 ? 'plus' : 'minus'}">${n >= 0 ? '+' : '−'}${Math.abs(n)}</span>`;
+  const profileHref = (id) => `#/profile/${encodeURIComponent(id)}`;
 
-  function avatar(u, size = 28) {
-    if (u?.avatar) return `<img class="avatar" src="${esc(u.avatar)}" width="${size}" height="${size}" alt="">`;
-    return `<span class="avatar-fallback" style="width:${size}px;height:${size}px">${esc((u?.username || '?')[0].toUpperCase())}</span>`;
+  function hue(seed) {
+    let h = 2166136261;
+    for (const c of String(seed || '?')) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+    return ((h >>> 0) % 12) * 30;   // 12 rozlišitelných odstínů
   }
-  const userLink = (u, size = 24) => `<a class="user-link" href="#/profile/${encodeURIComponent(u.id)}">${avatar(u, size)}<span>${esc(u.username)}</span></a>`;
+  function avatar(u, size = 28) {
+    if (u?.avatar) return `<img class="av" src="${esc(u.avatar)}" width="${size}" height="${size}" alt="">`;
+    const h = hue(u?.id || u?.username);
+    return `<span class="av" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background:hsl(${h} 20% 21%);color:hsl(${h} 70% 82%)">${esc((u?.username || '?')[0].toUpperCase())}</span>`;
+  }
+
+  function ring(deadline, total, size, stroke, fs) {
+    const r = (size - stroke) / 2;
+    const c = 2 * Math.PI * r;
+    return `<div class="ring" style="width:${size}px;height:${size}px;--fs:${fs}px" data-deadline="${deadline}" data-total="${total}" data-c="${c}">
+      <svg width="${size}" height="${size}"><circle class="track" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${stroke}"/>
+      <circle class="bar" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${stroke}" stroke-dasharray="${c}" stroke-dashoffset="0"/></svg>
+      <span class="num"></span></div>`;
+  }
 
   async function api(url, opts = {}) {
     const o = { ...opts, headers: { ...(opts.headers || {}) } };
@@ -59,13 +98,13 @@
         g.gain.setValueAtTime(0.15, ctx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.15);
         o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.16);
       });
-    } catch { /* ignore */ }
+    } catch { /* bez zvuku */ }
   }
 
   async function refreshMe() {
     const d = await api('/api/me');
     S.me = d.user; S.accounts = d.accounts || []; S.status = d.status || null;
-    renderNav(); renderBanner();
+    renderNav(); renderDock();
   }
 
   // ─────────── router ───────────
@@ -77,153 +116,154 @@
     const r = route();
     if (S.matchId && !(r.name === 'match' && r.id === String(S.matchId))) { emit('match_leave', { id: S.matchId }); S.matchId = null; }
     if (r.name !== 'draft') S.draftId = null;
+    if (r.name !== 'home') S.seen = null;
     document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === r.name));
     window.scrollTo(0, 0);
     const views = { home: viewHome, draft: viewDraft, match: viewMatch, profile: viewProfile, leaderboard: viewLeaderboard, matches: viewMatches };
     (views[r.name] || viewHome)(r.id);
-    renderBanner();
+    renderDock();
   }
   window.addEventListener('hashchange', render);
 
   function renderNav() {
     const el = $('#nav-user');
-    if (!S.me) { el.innerHTML = '<a class="btn" href="/auth/discord">Přihlásit přes Discord</a>'; return; }
+    if (!S.me) { el.innerHTML = '<a class="btn sm" href="/auth/discord">Přihlásit přes Discord</a>'; return; }
     el.innerHTML = `
-      <a class="user-chip" href="#/profile/${encodeURIComponent(S.me.id)}">${avatar(S.me, 30)}<span>${esc(S.me.username)}</span>
-        <span class="elo-pill">${S.me.elo}</span></a>
-      <button class="btn ghost sm" id="logout">Odhlásit</button>`;
+      <a class="me-chip" href="${profileHref(S.me.id)}">${avatar(S.me, 32)}<span class="nm">${esc(S.me.username)}</span><span class="elo">${S.me.elo}</span></a>
+      <button class="btn bare icon sm" id="logout" title="Odhlásit" aria-label="Odhlásit">${IC.out}</button>`;
     $('#logout').onclick = async () => { await api('/auth/logout', { method: 'POST' }); location.href = '/'; };
   }
 
-  function renderBanner() {
-    const el = $('#banner');
+  // Plovoucí lišta: fronta / draft / rozehraný zápas
+  function myQueueEntry() { return S.me && S.queue?.entries.find((e) => e.user.id === S.me.id); }
+  function renderDock() {
+    const el = $('#dock');
     const r = route();
     const st = S.status;
+    const mine = myQueueEntry();
     let html = '';
     if (st?.draft && !(r.name === 'draft' && r.id === st.draft)) {
-      html = `<span>Probíhá tvůj draft.</span><a class="btn sm" href="#/draft/${st.draft}">Otevřít draft</a>`;
+      html = `<span class="pulse"></span><b>Draft běží</b><a class="btn sm" href="#/draft/${st.draft}">Otevřít</a>`;
+    } else if (mine) {
+      html = `<span class="pulse"></span>${roleIcon(mine.role)}<b>Hledám hru</b><span class="t" data-since="${mine.joinedAt}"></span>
+        <button class="btn sm ghost" id="dock-leave">Zrušit</button>`;
     } else if (st?.activeMatch && !(r.name === 'match' && r.id === String(st.activeMatch))) {
-      html = `<span>Máš rozehraný zápas <b>#${st.activeMatch}</b>.</span><a class="btn sm" href="#/match/${st.activeMatch}">Otevřít zápas</a>`;
+      html = `<span class="pulse ok"></span><b>Zápas #${st.activeMatch}</b><a class="btn sm" href="#/match/${st.activeMatch}">Otevřít</a>`;
     }
-    el.innerHTML = html ? `<div class="bar"><div class="bar-inner">${html}</div></div>` : '';
+    el.innerHTML = html ? `<div class="dock" role="status">${html}</div>` : '';
+    const b = $('#dock-leave');
+    if (b) b.onclick = () => emit('queue_leave').then(refreshMe);
+    tick();
   }
 
-  // ─────────── HOME / FRONTA ───────────
+  // ─────────── FRONTA ───────────
   function viewHome() {
     if (!S.me) {
       app.innerHTML = `
         <section class="hero">
-          <h1>League of Legends <span>INHOUSE</span></h1>
-          <p>Připoj se do fronty na svou roli, potvrď hru, nech kapitány vydraftovat týmy a po hře nahraj replay. Elo se počítá automaticky.</p>
+          <h1>Inhouse 5v5</h1>
+          <p>Fronta podle rolí, draft kapitánů a elo po každé hře.</p>
           <a class="btn lg" href="/auth/discord">Přihlásit přes Discord</a>
-          ${S.config?.devLogin ? `<form id="dev-login" class="row" style="justify-content:center;margin-top:16px">
-            <input class="input" name="name" placeholder="Testovací jméno" required><button class="btn ghost">Dev přihlášení</button></form>` : ''}
-          <div class="steps">
-            <div class="step"><b>1 · Fronta</b><p>Vyber roli. Hraje prvních 10 hráčů – 2 na každou roli.</p></div>
-            <div class="step"><b>2 · Accept</b><p>Na přijetí hry máš ${S.config?.timers.readyCheck || 60} sekund.</p></div>
-            <div class="step"><b>3 · Draft</b><p>Dva kapitáni ze stejné role si střídavě vybírají spoluhráče.</p></div>
-            <div class="step"><b>4 · Výsledek</b><p>Vítěz nahraje .rofl, poražený potvrdí a přepočítá se elo.</p></div>
-          </div>
-        </section>`;
+          ${S.config?.devLogin ? '<form id="dev-login"><input class="input" name="name" placeholder="Testovací jméno" required><button class="btn ghost">Dev přihlášení</button></form>' : ''}
+        </section>
+        <div class="q-head"><h2 class="muted">Právě ve frontě</h2><div class="meter" id="meter"></div></div>
+        <div class="roles" id="roles"></div>`;
       const f = $('#dev-login');
       if (f) f.onsubmit = (e) => { e.preventDefault(); location.href = `/auth/dev?name=${encodeURIComponent(f.name.value)}`; };
+      renderQueue();
       return;
     }
-    app.innerHTML = '<div id="queue-view"></div><div class="layout-2"><div class="panel" id="queue-list"></div><div class="panel" id="side-panel"></div></div>';
+    app.innerHTML = `
+      <div class="q-head"><h1>Fronta</h1><div class="meter" id="meter"></div></div>
+      <div id="note"></div>
+      <div class="roles" id="roles"></div>
+      <div class="live" id="live"></div>`;
     renderQueue();
-    loadSidePanel();
+    loadLive();
   }
 
   function renderQueue() {
-    const root = $('#queue-view');
-    if (!root || !S.queue) return;
+    const rolesEl = $('#roles');
+    if (!rolesEl || !S.queue || !S.config) return;
     const q = S.queue;
-    const mine = q.entries.find((e) => e.user.id === S.me.id);
+    const roles = S.config.roles;
+    const by = Object.fromEntries(roles.map((r) => [r, q.entries.filter((e) => e.role === r)]));
+    const mine = myQueueEntry();
+    const interactive = !!S.me;
     const hasMain = S.accounts.some((a) => a.is_main);
     const busy = S.status?.draft || S.status?.readyCheck || S.status?.activeMatch;
-    const byRole = Object.fromEntries(S.config.roles.map((r) => [r, q.entries.filter((e) => e.role === r)]));
-    const filled = S.config.roles.filter((r) => byRole[r].length >= 2).length;
+    const filled = roles.reduce((s, r) => s + Math.min(2, by[r].length), 0);
+    const seenNow = new Set();
 
-    const myPos = mine ? byRole[mine.role].findIndex((e) => e.user.id === S.me.id) + 1 : 0;
-    root.innerHTML = `
-      ${!hasMain ? `<div class="warn"><span>Pro hraní potřebuješ v profilu přidat svůj <b>EUNE</b> účet (hlavní účet, na kterém budeš hrát).</span>
-        <a class="btn sm" href="#/profile/${encodeURIComponent(S.me.id)}">Přidat účet</a></div>` : ''}
-      <div class="queue-top">
-        <div>
-          <h1>Fronta</h1>
-          <div class="muted" style="margin-top:4px">${q.entries.length} hráčů ve frontě · obsazené role ${filled}/5
-            ${q.readyChecks ? ` · <span class="badge yellow">${q.readyChecks}× čeká na accept</span>` : ''}</div>
-        </div>
-        ${mine ? `<div class="queue-status"><span class="dot"></span>
-          <div><b>Hledám hru – ${ROLE_LABEL[mine.role]}</b><div class="small muted">${myPos <= 2 ? 'Jsi mezi prvními dvěma – hraješ, jakmile se obsadí ostatní role.' : `${myPos}. v pořadí na roli`} · <span data-since="${mine.joinedAt}"></span></div></div>
-          <button class="btn ghost sm" id="leave">Opustit frontu</button></div>` : ''}
-      </div>
-      <div class="progress" style="margin-bottom:16px"><div style="width:${Math.min(10, S.config.roles.reduce((s, r) => s + Math.min(2, byRole[r].length), 0)) * 10}%"></div></div>
-      <div class="roles">
-        ${S.config.roles.map((r) => {
-          const list = byRole[r];
-          const isMine = mine?.role === r;
-          const slots = [0, 1].map((i) => (list[i]
-            ? `<div class="slot">${userLink(list[i].user, 22)}<span class="elo">${list[i].user.elo}</span></div>`
-            : '<div class="slot empty">volné místo</div>')).join('');
-          const waiting = list.slice(2);
-          return `<div class="role-card ${isMine ? 'mine' : ''} ${list.length >= 2 ? 'full' : ''}">
-            <div class="row between"><span class="role-name">${ROLE_LABEL[r].toUpperCase()}</span><span class="badge gray">${list.length}</span></div>
-            ${slots}
-            ${waiting.length ? `<div class="waiting-list">${waiting.slice(0, 4).map((e, i) => `<div class="w">${i + 3}. ${esc(e.user.username)}</div>`).join('')}
-              ${waiting.length > 4 ? `<div class="w">+ ${waiting.length - 4} dalších</div>` : ''}</div>` : '<div class="waiting">Nikdo nečeká</div>'}
-            <div style="margin-top:auto">${isMine
-              ? '<button class="btn ghost" style="width:100%" data-leave>Opustit</button>'
-              : `<button class="btn" style="width:100%" data-join="${r}" ${!hasMain || busy ? 'disabled' : ''}>${mine ? 'Přepnout sem' : 'Připojit'}</button>`}</div>
-          </div>`;
-        }).join('')}
-      </div>`;
-    root.querySelectorAll('[data-join]').forEach((b) => { b.onclick = () => emit('queue_join', { role: b.dataset.join }).then(refreshMe); });
-    root.querySelectorAll('[data-leave], #leave').forEach((b) => { b.onclick = () => emit('queue_leave').then(refreshMe); });
+    $('#meter').innerHTML = `${Array.from({ length: 10 }, (_, i) => `<i class="${i < filled ? 'on' : ''}"></i>`).join('')}<b>${filled}/10</b>`;
+    const note = $('#note');
+    if (note) {
+      note.innerHTML = interactive && !hasMain
+        ? `<div class="note"><span>Pro hraní si přidej EUNE účet.</span><a class="btn sm" href="${profileHref(S.me.id)}">Přidat účet</a></div>` : '';
+    }
 
-    const list = $('#queue-list');
-    list.innerHTML = `<div class="panel-head"><h2>Pořadí ve frontě</h2><span class="muted small">kdo dřív přijde, ten hraje</span></div>
-      ${q.entries.length ? `<div class="list">${q.entries.map((e, i) => `<div class="list-row">
-        <span class="muted" style="width:22px">${i + 1}.</span>${roleTag(e.role)}${userLink(e.user)}
-        <span class="muted small" style="margin-left:auto">${e.user.elo} elo · <span data-since="${e.joinedAt}"></span></span></div>`).join('')}</div>`
-        : '<div class="empty-state">Fronta je prázdná. Buď první!</div>'}`;
-    tick();
+    rolesEl.innerHTML = roles.map((r) => {
+      const list = by[r];
+      const isMine = mine?.role === r;
+      const slots = [0, 1].map((i) => {
+        const e = list[i];
+        if (!e) return `<div class="slot empty" aria-label="Volné místo">${IC.plus}</div>`;
+        seenNow.add(e.user.id);
+        const pop = S.seen && !S.seen.has(e.user.id) ? ' pop' : '';
+        const me = S.me && e.user.id === S.me.id ? ' me' : '';
+        return `<a class="slot${pop}${me}" href="${profileHref(e.user.id)}">${avatar(e.user, 28)}<span class="nm">${esc(e.user.username)}</span><span class="elo">${e.user.elo}</span></a>`;
+      }).join('');
+      const waiting = list.slice(2);
+      const wait = waiting.length
+        ? `<div class="wait" title="Čekají na místo">${waiting.slice(0, 5).map((e) => avatar(e.user, 22)).join('')}<span>+${waiting.length}</span></div>`
+        : '<div class="wait"></div>';
+      let btn = '';
+      if (interactive) {
+        btn = isMine
+          ? '<button class="btn ghost" data-leave>Zrušit</button>'
+          : `<button class="btn" data-join="${r}" ${!hasMain || busy ? 'disabled' : ''}>${mine ? 'Přepnout' : 'Hrát'}</button>`;
+      }
+      return `<div class="role${isMine ? ' mine' : ''}${list.length >= 2 ? ' full' : ''}">
+        <div class="role-top">${roleIcon(r)}<b>${ROLE_LABEL[r]}</b><span class="cnt">${Math.min(2, list.length)}/2</span></div>
+        ${slots}${wait}${btn}</div>`;
+    }).join('');
+    S.seen = seenNow;
+
+    rolesEl.querySelectorAll('[data-join]').forEach((b) => { b.onclick = () => emit('queue_join', { role: b.dataset.join }).then(refreshMe); });
+    rolesEl.querySelectorAll('[data-leave]').forEach((b) => { b.onclick = () => emit('queue_leave').then(refreshMe); });
   }
 
-  async function loadSidePanel() {
-    const el = $('#side-panel');
+  async function loadLive() {
+    const el = $('#live');
     if (!el) return;
     const drafts = S.queue?.drafts || [];
     let matches = { active: [] };
     try { matches = await api('/api/matches'); } catch { /* ignore */ }
-    if (!$('#side-panel')) return;
-    el.innerHTML = `
-      <div class="panel-head"><h2>Právě se hraje</h2></div>
-      ${drafts.map((d) => `<a class="list-row" href="#/draft/${d.id}"><span class="badge">DRAFT</span>
-        <span>${esc(d.captains[0].username)} vs ${esc(d.captains[1].username)}</span></a>`).join('')}
-      ${matches.active.map((m) => `<a class="list-row" href="#/match/${m.id}"><b>#${m.id}</b>${statusBadge(m.status)}
-        <span class="muted small" style="margin-left:auto">${fmtDate(m.created_at)}</span></a>`).join('')}
-      ${!drafts.length && !matches.active.length ? '<div class="empty-state">Žádná hra neprobíhá.</div>' : ''}`;
+    if (!$('#live')) return;
+    const chips = [
+      ...drafts.map((d) => `<a class="chip" href="#/draft/${d.id}"><span class="dot draft"></span>Draft: ${esc(d.captains[0].username)} vs ${esc(d.captains[1].username)}</a>`),
+      ...matches.active.map((m) => `<a class="chip" href="#/match/${m.id}"><span class="dot"></span>Zápas #${m.id}</a>`),
+    ];
+    el.innerHTML = chips.length ? `<span class="lbl">Teď se hraje</span>${chips.join('')}` : '';
   }
 
-  // ─────────── READY CHECK ───────────
+  // ─────────── POTVRZENÍ HRY ───────────
   function renderReady() {
     const root = $('#modal-root');
     const rc = S.ready;
     if (!rc) { root.innerHTML = ''; document.title = 'INHOUSE'; return; }
     const total = S.config.timers.readyCheck * 1000;
-    root.innerHTML = `<div class="overlay"><div class="ready-box">
-      <h3>${ROLE_LABEL[rc.role] || ''}</h3>
-      <h2 style="margin-top:8px">HRA NALEZENA</h2>
-      <div class="ready-timer" data-deadline="${rc.deadline}" data-total="${total}"><span class="t"></span></div>
-      <div class="progress" data-deadline="${rc.deadline}" data-total="${total}"><div class="bar"></div></div>
-      <div class="pips">${Array.from({ length: rc.total }, (_, i) => `<span class="pip ${i < rc.accepted ? 'on' : ''}"></span>`).join('')}</div>
-      ${rc.you ? `<div class="muted">Přijato ✓ Čekáme na ostatní (${rc.accepted}/${rc.total})</div>`
-        : `<div class="ready-actions"><button class="btn lg" id="rc-accept">ACCEPT</button><button class="btn danger lg" id="rc-decline">Odmítnout</button></div>`}
+    root.innerHTML = `<div class="overlay"><div class="ready" role="dialog" aria-modal="true" aria-label="Hra nalezena">
+      ${roleIcon(rc.role, 'lg')}
+      <h2>Hra nalezena</h2>
+      ${ring(rc.deadline, total, 168, 8, 46)}
+      <div class="pips" aria-label="Přijalo ${rc.accepted} z ${rc.total}">${Array.from({ length: rc.total }, (_, i) => `<span class="pip ${i < rc.accepted ? 'on' : ''}"></span>`).join('')}</div>
+      ${rc.you ? '<p class="muted">Čekáme na ostatní</p>'
+        : '<div class="actions"><button class="btn lg" id="rc-accept">Přijmout</button><button class="btn bare" id="rc-decline">Odmítnout</button></div>'}
     </div></div>`;
-    document.title = '🔔 HRA NALEZENA – INHOUSE';
+    document.title = '🔔 Hra nalezena – INHOUSE';
     const a = $('#rc-accept'); const d = $('#rc-decline');
-    if (a) a.onclick = () => emit('ready_respond', { id: rc.id, accept: true });
+    if (a) { a.onclick = () => emit('ready_respond', { id: rc.id, accept: true }); a.focus(); }
     if (d) d.onclick = () => emit('ready_respond', { id: rc.id, accept: false });
     tick();
   }
@@ -231,15 +271,16 @@
   // ─────────── DRAFT ───────────
   function viewDraft(id) {
     S.draftId = id; S.draft = null; S.chat = { all: [], team: [] };
-    app.innerHTML = `<div class="draft-layout">
-      <div class="panel" id="draft-board"><div class="empty-state">Načítám draft…</div></div>
-      <aside class="panel chat">
-        <div class="chat-tabs"><button data-tab="all">Všichni</button><button data-tab="team">Tým</button></div>
-        <div class="chat-msgs" id="chat-msgs"></div>
-        <form class="chat-form" id="chat-form"><input class="input" name="text" maxlength="300" autocomplete="off" placeholder="Napiš zprávu…"><button class="btn">Odeslat</button></form>
+    app.innerHTML = `<div class="draft">
+      <section class="board" id="board"><div class="empty">Načítám draft…</div></section>
+      <aside class="chat">
+        <div class="seg" role="tablist"><button data-tab="all">Všichni</button><button data-tab="team">Tým</button></div>
+        <div class="msgs" id="msgs"></div>
+        <form class="send" id="send"><input class="input" name="text" maxlength="300" autocomplete="off" placeholder="Zpráva">
+          <button class="btn icon" aria-label="Odeslat">${IC.send}</button></form>
       </aside></div>`;
     app.querySelectorAll('[data-tab]').forEach((b) => { b.onclick = () => { S.chatTab = b.dataset.tab; renderChat(); }; });
-    $('#chat-form').onsubmit = (e) => {
+    $('#send').onsubmit = (e) => {
       e.preventDefault();
       const input = e.target.text;
       if (!input.value.trim()) return;
@@ -247,7 +288,7 @@
       input.value = '';
     };
     emit('draft_join', { id }).then((r) => {
-      if (!r?.state) { $('#draft-board').innerHTML = `<div class="empty-state">${esc(r?.error || 'Draft nenalezen.')}</div>`; return; }
+      if (!r?.state) { $('#board').innerHTML = `<div class="empty">${esc(r?.error || 'Draft nenalezen.')}</div>`; return; }
       syncTime(r.state.serverNow);
       S.draft = r.state; S.chat = r.chat;
       renderDraft(); renderChat();
@@ -265,68 +306,59 @@
 
   function renderDraft() {
     const d = S.draft;
-    const board = $('#draft-board');
+    const board = $('#board');
     if (!d || !board) return;
-    const actorCap = d.captains[d.actor];
-    const iAmActor = S.me && actorCap.id === S.me.id && d.phase !== 'done';
-    const capName = `<em>${esc(actorCap.username)}</em>`;
-    const phaseText = {
-      choice: `${capName} volí: první výběr hráče, nebo výběr strany`,
-      side: `${capName} volí stranu`,
-      pick: `Kolo ${d.round + 1}/${d.totalRounds} – vybírá ${capName}`,
-      done: 'Draft dokončen ✓',
-    }[d.phase];
+    const done = d.phase === 'done';
+    const actor = d.captains[d.actor];
+    const myTurn = !done && S.me && actor.id === S.me.id;
+    const canPick = myTurn && d.phase === 'pick';
     const total = S.config.timers.draftPick * 1000;
+    const sideVar = (t) => (d.side[t] ? `--side:var(--${d.side[t] === 'BLUE' ? 'blue' : 'red'})` : '');
 
-    const teamHtml = (t) => {
-      const side = d.side[t];
-      const members = d.teams[t];
-      const missing = d.totalRounds + 1 - members.length;
-      return `<div class="team ${side ? `side-${side}` : ''} ${d.actor === t && d.phase !== 'done' ? 'active' : ''}">
-        <div class="team-title"><span>Tým ${esc(d.captains[t].username)}</span>${sideBadge(side) || '<span class="badge gray">strana ?</span>'}</div>
-        ${members.map((p) => `<div class="member">${roleTag(p.role)}${userLink(p.user)}
-          <span class="note">${p.captain ? '👑 kapitán' : p.picked ? `pick ${p.round}` : 'dostal'}</span></div>`).join('')}
-        ${Array.from({ length: Math.max(0, missing) }, () => '<div class="member empty">čeká na výběr</div>').join('')}
-      </div>`;
+    const cap = (t, pos) => {
+      const c = d.captains[t];
+      return `<div class="cap ${pos}${!done && d.actor === t ? ' turn' : ''}">${avatar(c, 46)}
+        <div style="min-width:0"><span class="nm">${esc(c.username)}</span>
+        <div class="tags">${d.side[t] ? sideChip(d.side[t]) : ''}${d.firstPicker === t ? '<span class="chip-s">1. pick</span>' : ''}</div></div></div>`;
     };
 
-    let action = '';
-    if (iAmActor && d.phase === 'choice') {
-      action = `<div class="choice-box"><b>Jsi na tahu – vyber si výhodu</b>
-        <div class="muted small" style="margin-top:4px">Když vezmeš první výběr hráče, soupeř si volí stranu. Když vezmeš stranu, soupeř vybírá prvního hráče.</div>
-        <div class="row"><button class="btn lg" data-act="choice" data-value="pick">A) Volba prvního hráče</button>
-        <button class="btn ghost lg" data-act="choice" data-value="side">B) Volba ingame strany</button></div></div>`;
-    } else if (iAmActor && d.phase === 'side') {
-      action = `<div class="choice-box"><b>Vyber si stranu</b>
-        <div class="row"><button class="btn blue lg" data-act="side" data-value="BLUE">BLUE</button>
-        <button class="btn red lg" data-act="side" data-value="RED">RED</button></div></div>`;
-    } else if (iAmActor && d.phase === 'pick') {
-      action = '<div class="choice-box" style="padding:12px"><b>Vyber hráče</b> – druhý hráč ze stejné role připadne soupeři.</div>';
+    let phase;
+    if (done) phase = 'Týmy jsou hotové';
+    else if (myTurn) phase = { choice: 'Vyber si výhodu', side: 'Vyber stranu', pick: 'Vyber hráče' }[d.phase];
+    else phase = { choice: `${actor.username} volí výhodu`, side: `${actor.username} volí stranu`, pick: `${actor.username} vybírá` }[d.phase];
+
+    let opts = '';
+    if (myTurn && d.phase === 'choice') {
+      opts = `<div class="opts"><button class="opt" data-act="pick"><b>První pick</b><span>Soupeř si volí stranu</span></button>
+        <button class="opt" data-act="side"><b>Strana</b><span>Soupeř má první pick</span></button></div>`;
+    } else if (myTurn && d.phase === 'side') {
+      opts = '<div class="opts"><button class="opt blue" data-act="BLUE"><b>Blue</b></button><button class="opt red" data-act="RED"><b>Red</b></button></div>';
     }
 
-    const pool = Object.entries(d.pool);
-    board.innerHTML = `
-      <div class="draft-head">
-        <div><h3>Draft · kapitáni z role ${ROLE_LABEL[d.captainRole]}</h3><div class="draft-phase" style="margin-top:6px">${phaseText}</div></div>
-        ${d.phase !== 'done' ? `<div class="timer-big" data-deadline="${d.deadline}" data-total="${total}"><span class="t"></span></div>` : ''}
-      </div>
-      ${d.phase !== 'done' ? `<div class="progress" data-deadline="${d.deadline}" data-total="${total}"><div class="bar"></div></div>` : ''}
-      ${action}
-      <div class="teams">${teamHtml('A')}${teamHtml('B')}</div>
-      ${pool.length ? `<div class="pool"><h3 style="margin-top:8px">K výběru</h3>
-        ${pool.map(([role, players]) => `<div class="pool-role">${roleTag(role)}
-          ${players.map((u) => `<button class="pick-card ${iAmActor && d.phase === 'pick' ? 'can' : ''}" ${iAmActor && d.phase === 'pick' ? `data-pick="${esc(u.id)}"` : 'disabled'}>
-            ${avatar(u, 26)}<span>${esc(u.username)}</span><span class="elo">${u.elo}</span></button>`).join('')}
-        </div>`).join('')}</div>` : ''}
-      ${d.matchId ? `<div class="choice-box"><b>Zápas je připraven!</b><div class="row"><a class="btn lg" href="#/match/${d.matchId}">Přejít na zápas #${d.matchId}</a></div></div>` : ''}
-      <div class="log">${d.log.slice().reverse().map((l) => `<div>${new Date(l.ts).toLocaleTimeString('cs-CZ')} · ${esc(l.text)}</div>`).join('')}</div>`;
+    const slot = (p, t, pos) => (p
+      ? `<div class="dslot ${pos}" style="${sideVar(t)}">${avatar(p.user, 30)}<span class="nm">${esc(p.user.username)}</span>${p.captain ? `<span class="crown" title="Kapitán">${IC.crown}</span>` : ''}</div>`
+      : `<div class="dslot ${pos} empty" style="${sideVar(t)}"></div>`);
+    const cand = (u) => `<button class="cand${canPick ? ' can' : ''}" ${canPick ? `data-pick="${esc(u.id)}"` : 'disabled'}>${avatar(u, 24)}<span class="nm">${esc(u.username)}</span><span class="elo">${u.elo}</span></button>`;
+    const rows = S.config.roles.map((r) => {
+      const a = d.teams.A.find((p) => p.role === r);
+      const b = d.teams.B.find((p) => p.role === r);
+      const c = d.pool[r];
+      return `<div class="drow${c ? ' open' : ''}">${slot(a, 'A', 'left')}
+        <div class="mid">${c ? cand(c[0]) : '<span></span>'}${roleIcon(r)}${c ? cand(c[1]) : '<span></span>'}</div>
+        ${slot(b, 'B', 'right')}</div>`;
+    }).join('');
 
-    board.querySelectorAll('[data-act]').forEach((b) => {
-      b.onclick = () => emit('draft_action', { id: d.id, value: b.dataset.value });
-    });
-    board.querySelectorAll('[data-pick]').forEach((b) => {
-      b.onclick = () => emit('draft_action', { id: d.id, userId: b.dataset.pick });
-    });
+    board.innerHTML = `
+      <div class="dhead">${cap('A', 'left')}
+        <div class="dclock">${done ? `<div class="done-mark">${IC.check}</div>` : ring(d.deadline, total, 84, 6, 24)}</div>
+        ${cap('B', 'right')}</div>
+      <p class="phase${myTurn ? ' you' : ''}">${esc(phase)}${d.phase === 'pick' && !done ? ` <span class="faint">${d.round + 1}/${d.totalRounds}</span>` : ''}</p>
+      ${opts}
+      <div class="rows">${rows}</div>
+      ${d.matchId ? `<div class="go"><a class="btn lg" href="#/match/${d.matchId}">Přejít na zápas</a></div>` : ''}`;
+
+    board.querySelectorAll('[data-act]').forEach((b) => { b.onclick = () => emit('draft_action', { id: d.id, value: b.dataset.act }); });
+    board.querySelectorAll('[data-pick]').forEach((b) => { b.onclick = () => emit('draft_action', { id: d.id, userId: b.dataset.pick }); });
     renderChatTabs();
     tick();
   }
@@ -337,19 +369,25 @@
     if (S.chatTab === 'team' && !team) S.chatTab = 'all';
     app.querySelectorAll('[data-tab]').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === S.chatTab);
-      if (b.dataset.tab === 'team') { b.disabled = !team; b.textContent = team ? `Tým ${S.draft.captains[team].username}` : 'Tým'; }
+      if (b.dataset.tab === 'team') b.disabled = !team;
     });
-    const input = $('#chat-form input');
-    if (input) { input.disabled = !isPlayer; input.placeholder = isPlayer ? 'Napiš zprávu…' : 'Chatovat mohou jen hráči této hry'; }
+    const input = $('#send input');
+    if (input) { input.disabled = !isPlayer; input.placeholder = isPlayer ? 'Zpráva' : 'Jen pro hráče'; }
   }
 
   function renderChat() {
-    const box = $('#chat-msgs');
+    const box = $('#msgs');
     if (!box) return;
     renderChatTabs();
     const msgs = S.chatTab === 'team' ? S.chat.team : S.chat.all;
-    box.innerHTML = msgs.length ? msgs.map((m) => `<div class="msg"><span class="time">${new Date(m.ts).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' })}</span><span class="who">${esc(m.user.username)}</span>${esc(m.text)}</div>`).join('')
-      : `<div class="empty-state small">${S.chatTab === 'team' ? 'Týmový chat – vidí jen tvůj tým.' : 'Chat pro všech 10 hráčů.'}</div>`;
+    let prev = null;
+    box.innerHTML = msgs.length ? msgs.map((m) => {
+      const me = S.me && m.user.id === S.me.id;
+      const showWho = prev !== m.user.id;
+      prev = m.user.id;
+      return `<div class="msg${me ? ' me' : ''}">${showWho ? avatar(m.user, 22) : '<span style="width:22px;flex-shrink:0"></span>'}
+        <div class="body">${showWho ? `<div class="who">${esc(m.user.username)}</div>` : ''}<div class="text">${esc(m.text)}</div></div></div>`;
+    }).join('') : `<div class="empty">${S.chatTab === 'team' ? 'Vidí jen tvůj tým' : 'Napiš první zprávu'}</div>`;
     box.scrollTop = box.scrollHeight;
   }
 
@@ -358,86 +396,71 @@
     S.matchId = id;
     emit('match_join', { id });
     let data;
-    try { data = await api(`/api/matches/${id}`); } catch (e) { app.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; return; }
+    try { data = await api(`/api/matches/${id}`); } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
     if (S.matchId !== id) return;
     const { match: m, players, viewer: v } = data;
-    const team = (side) => players.filter((p) => p.team === side);
     const done = m.status === 'finished';
     const pending = m.pending;
+    const statsOf = (p) => (done ? p : pending?.stats?.[p.user_id] || null);
 
-    const teamTable = (side) => `<div class="team side-${side}">
-      <div class="team-title"><span>Tým ${side}</span>${done ? (m.winner === side ? '<span class="badge green">VÝHRA</span>' : '<span class="badge gray">PROHRA</span>') : sideBadge(side)}</div>
-      <table><thead><tr><th>Hráč</th>${done ? '<th>Champion</th><th class="num">KDA</th><th class="num">CS</th><th class="num">Dmg</th><th class="num">Elo</th>' : '<th class="num">Elo</th>'}</tr></thead>
-      <tbody>${team(side).map((p) => `<tr>
-        <td><div class="row">${roleTag(p.role)}${userLink({ id: p.user_id, username: p.username, avatar: p.avatar })}${p.is_captain ? ' 👑' : ''}</div>
-          <div class="small muted" style="margin:3px 0 0 48px">${esc(p.riot_id || '')}</div></td>
-        ${done ? `<td>${esc(p.champion || '–')}</td><td class="num">${p.kills ?? '–'}/${p.deaths ?? '–'}/${p.assists ?? '–'}</td>
-          <td class="num">${p.cs ?? '–'}</td><td class="num">${p.damage != null ? p.damage.toLocaleString('cs-CZ') : '–'}</td>
-          <td class="num">${p.elo_after}<span class="${p.elo_after >= p.elo_before ? 'plus' : 'minus'}"> ${p.elo_after >= p.elo_before ? '+' : ''}${p.elo_after - p.elo_before}</span></td>`
-          : `<td class="num">${p.current_elo}</td>`}
-      </tr>`).join('')}</tbody></table></div>`;
+    const mp = (p, pos) => {
+      if (!p) return `<div class="mp ${pos}"></div>`;
+      const s = statsOf(p);
+      const u = { id: p.user_id, username: p.username, avatar: p.avatar };
+      const meta = s && s.kills != null ? `${esc(s.champion || '')} <span class="faint">${s.kills}/${s.deaths}/${s.assists}</span>` : esc(p.riot_id || '');
+      const end = done && p.elo_after != null ? `<span class="end">${delta(p.elo_after - p.elo_before)}</span>` : `<span class="end plain">${p.current_elo}</span>`;
+      return `<a class="mp ${pos}" href="${profileHref(p.user_id)}">${avatar(u, 38)}
+        <div class="who"><div class="nm">${esc(p.username)}${p.is_captain ? `<span class="crown" title="Kapitán">${IC.crown}</span>` : ''}</div><div class="meta">${meta}</div></div>${end}</a>`;
+    };
+    const rows = S.config.roles.map((r) => `<div class="mrow">${mp(players.find((p) => p.team === 'BLUE' && p.role === r), 'left')}
+      <div class="mid">${roleIcon(r)}</div>${mp(players.find((p) => p.team === 'RED' && p.role === r), 'right')}</div>`).join('');
+    const th = (side, pos) => {
+      let res = '';
+      if (done) res = m.winner === side ? '<span class="chip-s ok">Výhra</span>' : '<span class="chip-s off">Prohra</span>';
+      return `<div class="th ${side.toLowerCase()} ${pos}"><b>${sideName(side)}</b>${res}${v.myTeam === side ? '<span class="chip-s">Tvůj tým</span>' : ''}</div>`;
+    };
 
     let lobby = '';
     if (m.lobby) {
-      const myVoice = m.voice && (v.myTeam ? m.voice[v.myTeam] : null);
-      lobby = `<div class="panel"><div class="panel-head"><h2>Lobby</h2>${v.myTeam ? `<span>Hraješ za ${sideBadge(v.myTeam)}</span>` : ''}</div>
-        <div class="lobby">
-          <div class="field"><div><label>Název hry</label><strong>${esc(m.lobby.name)}</strong></div><button class="btn ghost sm" data-copy="${esc(m.lobby.name)}">Kopírovat</button></div>
-          <div class="field"><div><label>Heslo</label><strong>${esc(m.lobby.password)}</strong></div><button class="btn ghost sm" data-copy="${esc(m.lobby.password)}">Kopírovat</button></div>
-          ${myVoice ? `<a class="btn lg" href="${esc(myVoice.invite)}" target="_blank" rel="noopener">🎧 Připojit do voice</a>`
-            : m.voice && v.isAdmin ? Object.entries(m.voice).map(([s, x]) => `<a class="btn ghost" href="${esc(x.invite)}" target="_blank">${s} voice</a>`).join('')
-            : '<div class="field muted small">Voice kanál zatím není (bot není připojen).</div>'}
-        </div>
-        <div class="small muted" style="margin-top:10px">Lobby zakládá kapitán BLUE týmu: Play → Create Custom → Summoner's Rift, Tournament Draft, zadej název a heslo.</div>
-      </div>`;
+      const myVoice = m.voice && v.myTeam ? m.voice[v.myTeam] : null;
+      let voice;
+      if (myVoice) voice = `<a class="btn voice" href="${esc(myVoice.invite)}" target="_blank" rel="noopener">${IC.voice}Voice</a>`;
+      else if (m.voice && v.isAdmin) voice = `<div class="field">${Object.entries(m.voice).map(([s, x]) => `<a class="btn sm ghost" href="${esc(x.invite)}" target="_blank" rel="noopener">${sideName(s)}</a>`).join('')}</div>`;
+      else voice = '<div class="field off">Voice zatím není</div>';
+      lobby = `<div class="lobby">
+        <div class="field"><div style="min-width:0"><small>Název hry</small><strong>${esc(m.lobby.name)}</strong></div>
+          <button class="btn bare icon" data-copy="${esc(m.lobby.name)}" title="Kopírovat" aria-label="Kopírovat název">${IC.copy}</button></div>
+        <div class="field"><div style="min-width:0"><small>Heslo</small><strong>${esc(m.lobby.password)}</strong></div>
+          <button class="btn bare icon" data-copy="${esc(m.lobby.password)}" title="Kopírovat" aria-label="Kopírovat heslo">${IC.copy}</button></div>
+        ${voice}</div>
+        <p class="hint">Lobby zakládá kapitán Blue týmu.</p>`;
     }
 
-    let result = '';
-    if (done) {
-      result = `<div class="winner-banner ${m.winner}">🏆 Vyhrál tým ${m.winner}${m.duration ? ` · ${fmtDur(m.duration * 1000)}` : ''}</div>`;
-    } else if (m.status === 'cancelled') {
-      result = '<div class="panel empty-state">Zápas byl zrušen adminem. Elo se nezměnilo.</div>';
-    } else if (m.status === 'awaiting_confirm' && pending) {
-      const loserName = players.find((p) => p.user_id === m.loserCaptain)?.username || 'kapitán poraženého týmu';
-      result = `<div class="panel"><div class="panel-head"><h2>Nahraný výsledek</h2>${statusBadge(m.status)}</div>
-        <div class="winner-banner ${pending.winner}">Podle replaye vyhrál ${pending.winner}${pending.duration ? ` · ${fmtDur(pending.duration * 1000)}` : ''}</div>
-        <table style="margin-top:12px"><thead><tr><th>Hráč</th><th>Strana</th><th>Champion</th><th class="num">KDA</th><th class="num">CS</th><th class="num">Dmg</th></tr></thead><tbody>
-        ${players.map((p) => { const s = pending.stats[p.user_id] || {}; return `<tr><td>${esc(p.username)}</td><td>${sideBadge(p.team)}</td><td>${esc(s.champion)}</td>
-          <td class="num">${s.kills}/${s.deaths}/${s.assists}</td><td class="num">${s.cs}</td><td class="num">${(s.damage || 0).toLocaleString('cs-CZ')}</td></tr>`; }).join('')}
-        </tbody></table>
-        <div class="divider"></div>
-        ${v.canConfirm ? `<div class="row"><button class="btn lg" id="confirm">Potvrdit výsledek</button><button class="btn danger" id="dispute">Rozporovat</button>
-          <span class="muted small">Po potvrzení se zapíšou statistiky, přepočítá elo a smažou voice roomky.</span></div>`
-          : `<div class="muted">Čeká se na potvrzení – ${esc(loserName)}.</div>`}
-      </div>`;
+    let status = '';
+    if (m.status === 'awaiting_confirm' && pending) {
+      const loser = players.find((p) => p.user_id === m.loserCaptain)?.username || 'kapitána soupeře';
+      status = `<div class="card status-card"><div><h2>Vyhrál ${sideName(pending.winner)}</h2>
+        <p>${v.canConfirm ? 'Podle nahraného replaye. Potvrď výsledek.' : `Čeká na potvrzení od ${esc(loser)}.`}</p></div>
+        ${v.canConfirm ? '<div class="acts"><button class="btn danger" id="dispute">Rozporovat</button><button class="btn" id="confirm">Potvrdit</button></div>' : ''}</div>`;
     } else if (m.status === 'disputed') {
-      result = `<div class="panel"><div class="panel-head"><h2>Výsledek je rozporován</h2>${statusBadge(m.status)}</div>
-        <div class="muted">Kapitán poraženého týmu výsledek nepotvrdil. Rozhodne admin, nebo může kapitán nahrát správný replay.</div>
-        ${v.isAdmin && pending ? `<div class="row" style="margin-top:12px"><button class="btn" id="confirm">Admin: potvrdit (vítěz ${pending.winner})</button></div>` : ''}
-      </div>`;
+      status = `<div class="card status-card"><div><h2>Výsledek je rozporovaný</h2><p>Rozhodne admin, nebo nahraj správný replay.</p></div>
+        ${v.isAdmin && pending ? `<div class="acts"><button class="btn" id="confirm">Potvrdit výhru ${sideName(pending.winner)}</button></div>` : ''}</div>`;
+    } else if (m.status === 'cancelled') {
+      status = '<div class="card status-card"><div><h2>Zápas byl zrušen</h2><p>Elo se nezměnilo.</p></div></div>';
     }
 
-    let uploadBox = '';
-    if (v.canUpload) {
-      uploadBox = `<div class="panel"><div class="panel-head"><h2>Nahrát výsledek</h2><span class="muted small">kapitán vítězného týmu</span></div>
-        <label class="drop" id="drop"><input type="file" accept=".rofl" id="rofl" hidden>
-          <div><b>Přetáhni sem .rofl soubor</b> nebo klikni a vyber</div>
-          <div class="small muted" style="margin-top:6px">Replay stáhneš v klientu: Profil → Match History → zápas → ikona stažení. Najdeš ho v Dokumenty/League of Legends/Replays.</div>
-        </label><div id="upload-status" class="small muted" style="margin-top:8px"></div></div>`;
-    }
+    const upload = v.canUpload ? `<label class="drop" id="drop"><input type="file" accept=".rofl" id="rofl" hidden>${IC.upload}
+      <b>Nahrát replay vítěze</b><span class="muted small">Soubor .rofl stáhneš v klientu v historii zápasů.</span></label><p class="hint" id="upload-status"></p>` : '';
 
+    const meta = [fmtDate(m.created_at), m.duration ? fmtDur(m.duration * 1000) : ''].filter(Boolean).join(', ');
     app.innerHTML = `
-      <div class="match-head">
-        <div class="row"><h1>Zápas #${m.id}</h1>${statusBadge(m.status)}</div>
-        <div class="row muted small">${fmtDate(m.created_at)} · kapitáni z role ${ROLE_LABEL[m.captainRole] || ''}
-          ${v.isAdmin && !['finished', 'cancelled'].includes(m.status) ? '<button class="btn danger sm" id="cancel">Admin: zrušit zápas</button>' : ''}</div>
-      </div>
+      <div class="mhead"><h1>Zápas #${m.id}</h1>${statusChip(m.status)}<span class="faint small">${meta}</span><span class="sp"></span>
+        ${v.isAdmin && !['finished', 'cancelled'].includes(m.status) ? '<button class="btn danger sm" id="cancel">Zrušit zápas</button>' : ''}</div>
+      ${lobby}
       <div class="stack">
-        ${result}${lobby}
-        <div class="teams" style="margin-top:0">${teamTable('BLUE')}${teamTable('RED')}</div>
-        ${uploadBox}
-        ${m.draftLog.length ? `<details class="panel"><summary class="muted" style="cursor:pointer">Průběh draftu</summary>
-          <div class="log">${m.draftLog.map((l) => `<div>${esc(l.text)}</div>`).join('')}</div></details>` : ''}
+        ${status}
+        <div class="vs"><div class="vs-head">${th('BLUE', 'left')}<span></span>${th('RED', 'right')}</div><div class="rows">${rows}</div></div>
+        ${upload}
       </div>`;
 
     app.querySelectorAll('[data-copy]').forEach((b) => {
@@ -446,9 +469,9 @@
     const act = (url, msg) => async () => {
       try { await api(url, { method: 'POST' }); toast(msg, 'success'); refreshMe(); viewMatch(id); } catch (e) { toast(e.message, 'error'); }
     };
-    if ($('#confirm')) $('#confirm').onclick = act(`/api/matches/${id}/confirm`, 'Výsledek potvrzen, elo přepočítáno.');
-    if ($('#dispute')) $('#dispute').onclick = () => { if (confirm('Opravdu rozporovat výsledek? Rozhodne admin.')) act(`/api/matches/${id}/dispute`, 'Výsledek rozporován.')(); };
-    if ($('#cancel')) $('#cancel').onclick = () => { if (confirm('Zrušit zápas bez změny ela?')) act(`/api/matches/${id}/cancel`, 'Zápas zrušen.')(); };
+    if ($('#confirm')) $('#confirm').onclick = act(`/api/matches/${id}/confirm`, 'Výsledek potvrzen');
+    if ($('#dispute')) $('#dispute').onclick = () => { if (confirm('Rozporovat výsledek? Rozhodne admin.')) act(`/api/matches/${id}/dispute`, 'Výsledek rozporován')(); };
+    if ($('#cancel')) $('#cancel').onclick = () => { if (confirm('Zrušit zápas bez změny ela?')) act(`/api/matches/${id}/cancel`, 'Zápas zrušen')(); };
 
     const drop = $('#drop');
     if (drop) {
@@ -456,11 +479,11 @@
         if (!file) return;
         if (!file.name.toLowerCase().endsWith('.rofl')) { toast('Vyber soubor .rofl', 'error'); return; }
         const st = $('#upload-status');
-        st.textContent = `Nahrávám ${file.name} (${(file.size / 1048576).toFixed(1)} MB)…`;
+        st.textContent = `Nahrávám ${file.name}…`;
         const fd = new FormData(); fd.append('rofl', file);
         try {
           const r = await api(`/api/matches/${id}/result`, { method: 'POST', body: fd });
-          toast(`Výsledek nahrán (vítěz ${r.winner}). Čeká na potvrzení soupeřem.`, 'success');
+          toast(`Replay nahrán, vyhrál ${sideName(r.winner)}`, 'success');
           viewMatch(id);
         } catch (e) { st.textContent = ''; toast(e.message, 'error'); }
       };
@@ -473,56 +496,63 @@
 
   // ─────────── PROFIL ───────────
   async function viewProfile(id) {
-    if (!id) { location.hash = S.me ? `#/profile/${encodeURIComponent(S.me.id)}` : '#/'; return; }
+    if (!id) { location.hash = S.me ? profileHref(S.me.id) : '#/'; return; }
     let d;
-    try { d = await api(`/api/users/${encodeURIComponent(id)}`); } catch (e) { app.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; return; }
+    try { d = await api(`/api/users/${encodeURIComponent(id)}`); } catch (e) { app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
     const u = d.user; const s = d.stats;
     const games = u.wins + u.losses;
+    const wr = games ? Math.round((u.wins / games) * 100) : null;
     const kda = s.games ? ((s.kills + s.assists) / Math.max(1, s.deaths)).toFixed(2) : '–';
 
-    const accounts = d.accounts.map((a) => `<div class="account ${a.is_main ? 'main' : ''}">
-        <span class="badge ${a.region === 'EUNE' ? '' : 'gray'}">${esc(a.region)}</span>
-        <span class="rid">${esc(a.game_name)}<span class="muted">#${esc(a.tag_line)}</span></span>
-        ${a.is_main ? '<span class="badge green">HLAVNÍ</span>' : ''}${a.verified ? '<span class="small muted">✓ ověřeno</span>' : ''}
-        ${d.isMe ? `<div class="actions">${!a.is_main && a.region === 'EUNE' ? `<button class="btn ghost sm" data-main="${a.id}">Nastavit jako hlavní</button>` : ''}
-          <button class="btn danger sm" data-del="${a.id}">Odebrat</button></div>` : ''}
-      </div>`).join('') || '<div class="empty-state">Žádné účty.</div>';
+    const accounts = d.accounts.map((a) => `<div class="acc${a.is_main ? ' main' : ''}">
+        <span class="reg">${esc(a.region)}</span>
+        <span class="rid">${esc(a.game_name)}<span class="faint">#${esc(a.tag_line)}</span></span>
+        ${a.is_main ? '<span class="chip-s">Hlavní</span>' : ''}
+        ${d.isMe ? `<span class="acts">${!a.is_main && a.region === 'EUNE' ? `<button class="btn bare icon sm" data-main="${a.id}" title="Nastavit jako hlavní" aria-label="Nastavit jako hlavní">${IC.star}</button>` : ''}
+          <button class="btn bare icon sm" data-del="${a.id}" title="Odebrat" aria-label="Odebrat účet">${IC.x}</button></span>` : ''}
+      </div>`).join('') || '<div class="empty">Žádné účty</div>';
+
+    const history = d.history.map((h) => {
+      const cls = h.status === 'finished' ? (h.win ? 'w' : 'l') : '';
+      const end = h.elo_after != null ? delta(h.elo_after - h.elo_before) : statusChip(h.status);
+      return `<a class="hrow ${cls}" href="#/match/${h.id}"><span class="bar"></span>${roleIcon(h.role)}
+        <div style="min-width:0"><div class="nm">${esc(h.champion || ROLE_LABEL[h.role])}${h.is_captain ? ` <span class="crown" title="Kapitán">${IC.crown}</span>` : ''}</div>
+        <div class="meta">#${h.id}, ${fmtDate(h.created_at)}</div></div>
+        <span class="kda">${h.kills != null ? `${h.kills}/${h.deaths}/${h.assists}` : ''}</span><span class="end">${end}</span></a>`;
+    }).join('');
+
+    const pct = (w, g) => Math.round((w / g) * 100);
+    const roles = d.roles.map((r) => `<div class="srow">${roleIcon(r.role)}<span>${ROLE_LABEL[r.role]}</span>
+      <span class="v">${r.games}×</span><span class="wrbar"><i style="width:${pct(r.wins, r.games)}%"></i></span><span class="v" style="margin-left:0;width:36px;text-align:right">${pct(r.wins, r.games)} %</span></div>`).join('');
+    const champs = d.champions.map((c) => `<div class="srow"><span class="nm">${esc(c.champion)}</span>
+      <span class="v">${c.games}×</span><span class="wrbar"><i style="width:${pct(c.wins, c.games)}%"></i></span><span class="v" style="margin-left:0;width:36px;text-align:right">${pct(c.wins, c.games)} %</span></div>`).join('');
 
     app.innerHTML = `
-      <div class="profile-head">${avatar(u, 72)}
-        <div><h1>${esc(u.username)}</h1><div class="muted" style="margin-top:4px">${d.rank ? `#${d.rank} v žebříčku · ` : ''}členem od ${new Date(u.created_at).toLocaleDateString('cs-CZ')}</div></div>
+      <div class="phead">${avatar(u, 72)}
+        <div><h1>${esc(u.username)}</h1><div class="muted">${d.rank ? `${d.rank}. místo v žebříčku` : 'Zatím bez zápasu'}</div></div>
+        <div class="pelo"><b>${u.elo}</b><span>elo</span></div></div>
+      <div class="strip">
+        <div><b>${games}</b><span>Zápasy</span></div>
+        <div><b><span class="ok">${u.wins}</span><span class="faint"> / </span><span class="bad">${u.losses}</span></b><span>Výhry / prohry</span></div>
+        <div><b>${wr != null ? `${wr} %` : '–'}</b><span>Winrate</span></div>
+        <div><b>${kda}</b><span>KDA</span></div>
+        <div><b>${s.cs ? Math.round(s.cs) : '–'}</b><span>Ø CS</span></div>
       </div>
-      <div class="stat-grid">
-        <div class="stat"><h3>Elo</h3><div class="v accent">${u.elo}</div></div>
-        <div class="stat"><h3>Zápasy</h3><div class="v">${games}</div></div>
-        <div class="stat"><h3>V / P</h3><div class="v"><span class="result-W">${u.wins}</span> / <span class="result-L">${u.losses}</span></div></div>
-        <div class="stat"><h3>Winrate</h3><div class="v">${games ? Math.round((u.wins / games) * 100) + ' %' : '–'}</div></div>
-        <div class="stat"><h3>KDA</h3><div class="v">${kda}</div></div>
-        <div class="stat"><h3>Ø CS</h3><div class="v">${s.cs ? Math.round(s.cs) : '–'}</div></div>
-      </div>
-      <div class="layout-2" style="margin-top:0">
-        <div class="panel"><div class="panel-head"><h2>Historie zápasů</h2></div>
-          ${d.history.length ? `<table><thead><tr><th>Zápas</th><th></th><th>Role</th><th>Champion</th><th class="num">KDA</th><th class="num">CS</th><th class="num">Elo</th></tr></thead><tbody>
-          ${d.history.map((h) => `<tr style="cursor:pointer" onclick="location.hash='#/match/${h.id}'">
-            <td><b>#${h.id}</b> <span class="small muted">${fmtDate(h.created_at)}</span></td>
-            <td>${h.status === 'finished' ? `<span class="result-${h.win ? 'W' : 'L'}">${h.win ? 'VÝHRA' : 'PROHRA'}</span>` : statusBadge(h.status)}</td>
-            <td>${roleTag(h.role)}${h.is_captain ? ' 👑' : ''}</td><td>${esc(h.champion || '–')}</td>
-            <td class="num">${h.kills != null ? `${h.kills}/${h.deaths}/${h.assists}` : '–'}</td><td class="num">${h.cs ?? '–'}</td>
-            <td class="num">${h.elo_after != null ? `<span class="${h.elo_after >= h.elo_before ? 'plus' : 'minus'}">${h.elo_after >= h.elo_before ? '+' : ''}${h.elo_after - h.elo_before}</span>` : '–'}</td>
-          </tr>`).join('')}</tbody></table>` : '<div class="empty-state">Zatím žádné zápasy.</div>'}
-        </div>
-        <div class="stack">
-          <div class="panel"><div class="panel-head"><h2>League of Legends účty</h2><span class="muted small">${d.accounts.length}/3</span></div>
+      <div class="cols">
+        <div class="card"><div class="card-head"><h2>Historie</h2></div>
+          ${history ? `<div class="list">${history}</div>` : '<div class="empty">Zatím žádné zápasy</div>'}</div>
+        <div class="side-col">
+          <div class="card"><div class="card-head"><h2>Účty</h2><span class="faint small">${d.accounts.length}/3</span></div>
             ${accounts}
-            ${d.isMe && d.accounts.length < 3 ? `<form class="add-form" id="add-acc">
-              <input class="input" name="gameName" placeholder="Jméno (Riot ID)" required maxlength="16">
-              <input class="input" name="tagLine" placeholder="#TAG" required maxlength="6">
-              <select class="input" name="region">${S.config.regions.map((r) => `<option ${r === 'EUNE' ? 'selected' : ''}>${r}</option>`).join('')}</select>
-              <button class="btn">Přidat</button></form>` : ''}
-            ${d.isMe ? '<div class="small muted" style="margin-top:10px">Min. 1, max. 3 účty. Hlavní účet musí být <b>EUNE</b> – na něm hraješ inhouse hry a podle něj se páruje replay.</div>' : ''}
+            ${d.isMe && d.accounts.length < 3 ? `<form class="addf" id="add-acc">
+              <input class="input" name="gameName" placeholder="Jméno" required maxlength="16" aria-label="Riot jméno">
+              <input class="input" name="tagLine" placeholder="Tag" required maxlength="6" aria-label="Tag">
+              <select class="input" name="region" aria-label="Region">${S.config.regions.map((r) => `<option ${r === 'EUNE' ? 'selected' : ''}>${r}</option>`).join('')}</select>
+              <button class="btn icon" aria-label="Přidat účet">${IC.plus}</button></form>` : ''}
+            ${d.isMe && !d.accounts.some((a) => a.is_main) ? '<p class="hint">Hlavní účet musí být EUNE.</p>' : ''}
           </div>
-          ${d.roles.length ? `<div class="panel"><div class="panel-head"><h2>Role</h2></div>${d.roles.map((r) => `<div class="list-row">${roleTag(r.role)}<span>${r.games} her</span><span class="muted small" style="margin-left:auto">${Math.round((r.wins / r.games) * 100)} % WR</span></div>`).join('')}</div>` : ''}
-          ${d.champions.length ? `<div class="panel"><div class="panel-head"><h2>Championi</h2></div>${d.champions.map((c) => `<div class="list-row"><span>${esc(c.champion)}</span><span class="muted small" style="margin-left:auto">${c.games} her · ${Math.round((c.wins / c.games) * 100)} %</span></div>`).join('')}</div>` : ''}
+          ${roles ? `<div class="card"><div class="card-head"><h2>Role</h2></div>${roles}</div>` : ''}
+          ${champs ? `<div class="card"><div class="card-head"><h2>Championi</h2></div>${champs}</div>` : ''}
         </div>
       </div>`;
 
@@ -547,33 +577,42 @@
   // ─────────── ŽEBŘÍČEK / ZÁPASY ───────────
   async function viewLeaderboard() {
     const d = await api('/api/leaderboard');
-    app.innerHTML = `<h1 style="margin-bottom:18px">Žebříček</h1><div class="panel">
-      ${d.players.length ? `<table><thead><tr><th style="width:50px">#</th><th>Hráč</th><th class="num">Elo</th><th class="num">Výhry</th><th class="num">Prohry</th><th class="num">Winrate</th></tr></thead><tbody>
-      ${d.players.map((p, i) => `<tr><td class="muted">${i + 1}</td><td>${userLink(p)}</td><td class="num" style="color:var(--accent);font-weight:700">${p.elo}</td>
-        <td class="num">${p.wins}</td><td class="num">${p.losses}</td><td class="num">${Math.round((p.wins / (p.wins + p.losses)) * 100)} %</td></tr>`).join('')}
-      </tbody></table>` : '<div class="empty-state">Zatím nikdo nedohrál žádný zápas.</div>'}</div>`;
+    const rows = d.players.map((p, i) => {
+      const wr = Math.round((p.wins / (p.wins + p.losses)) * 100);
+      return `<a class="lrow" href="${profileHref(p.id)}"><span class="rank${i < 3 ? ' top' : ''}">${i + 1}</span>
+        <span class="who">${avatar(p, 34)}<span class="nm">${esc(p.username)}</span></span>
+        <span class="wl"><span class="ok">${p.wins}</span><span class="faint"> / </span><span class="bad">${p.losses}</span></span>
+        <span class="wr"><span class="wrbar"><i style="width:${wr}%"></i></span>${wr} %</span>
+        <span class="elo">${p.elo}</span></a>`;
+    }).join('');
+    app.innerHTML = `<h1 class="page-title">Žebříček</h1>
+      <div class="card">${rows ? `<div class="list">${rows}</div>` : '<div class="empty">Zatím nikdo nedohrál zápas</div>'}</div>`;
   }
 
   async function viewMatches() {
     const d = await api('/api/matches');
     const row = (m) => {
-      const blue = m.players.filter((p) => p.team === 'BLUE').map((p) => esc(p.username)).join(', ');
-      const red = m.players.filter((p) => p.team === 'RED').map((p) => esc(p.username)).join(', ');
-      return `<a class="list-row" href="#/match/${m.id}"><b style="width:44px">#${m.id}</b>${statusBadge(m.status)}
-        <span class="small" style="flex:1"><span style="color:var(--blue)">${blue}</span> <span class="muted">vs</span> <span style="color:var(--red)">${red}</span></span>
-        ${m.winner ? sideBadge(m.winner) : ''}<span class="muted small">${fmtDate(m.created_at)}</span></a>`;
+      const team = (s) => m.players.filter((p) => p.team === s).map((p) => avatar({ id: p.user_id, username: p.username, avatar: p.avatar }, 26)).join('');
+      return `<a class="mlrow" href="#/match/${m.id}"><span class="rank">#${m.id}</span>
+        <span class="teams"><span class="avs blue">${team('BLUE')}</span><span class="faint small">vs</span><span class="avs red">${team('RED')}</span>
+        ${m.winner ? sideChip(m.winner) : ''}</span>
+        ${statusChip(m.status)}<span class="when">${fmtDate(m.created_at)}</span></a>`;
     };
-    app.innerHTML = `<h1 style="margin-bottom:18px">Zápasy</h1><div class="stack">
-      <div class="panel"><div class="panel-head"><h2>Probíhající</h2></div>${d.active.map(row).join('') || '<div class="empty-state">Nic neprobíhá.</div>'}</div>
-      <div class="panel"><div class="panel-head"><h2>Poslední</h2></div>${d.recent.map(row).join('') || '<div class="empty-state">Zatím žádné zápasy.</div>'}</div></div>`;
+    app.innerHTML = `<h1 class="page-title">Zápasy</h1>
+      ${d.active.length ? `<div class="card"><div class="list">${d.active.map(row).join('')}</div></div>` : ''}
+      <h2 class="section-title">Dohrané</h2>
+      <div class="card">${d.recent.length ? `<div class="list">${d.recent.map(row).join('')}</div>` : '<div class="empty">Zatím žádné zápasy</div>'}</div>`;
   }
 
   // ─────────── časovače ───────────
   function tick() {
-    document.querySelectorAll('[data-deadline]').forEach((el) => {
+    document.querySelectorAll('.ring[data-deadline]').forEach((el) => {
+      const total = Number(el.dataset.total);
       const left = Math.max(0, Number(el.dataset.deadline) - now());
-      const t = el.querySelector('.t'); if (t) t.textContent = `${Math.ceil(left / 1000)}`;
-      const bar = el.querySelector('.bar'); if (bar) bar.style.width = `${(left / Number(el.dataset.total)) * 100}%`;
+      const c = Number(el.dataset.c);
+      el.querySelector('.bar').style.strokeDashoffset = String(c * (1 - left / total));
+      el.querySelector('.num').textContent = String(Math.ceil(left / 1000));
+      el.classList.toggle('urgent', left < 10000);
     });
     document.querySelectorAll('[data-since]').forEach((el) => { el.textContent = fmtDur(now() - Number(el.dataset.since)); });
   }
@@ -583,7 +622,8 @@
   socket.on('queue_state', (q) => {
     syncTime(q.serverNow);
     S.queue = q;
-    if (route().name === 'home' && S.me) { renderQueue(); loadSidePanel(); }
+    if (route().name === 'home') { renderQueue(); loadLive(); }
+    renderDock();
   });
   socket.on('ready_check', (rc) => {
     syncTime(rc.serverNow);
@@ -613,10 +653,10 @@
   });
   socket.on('draft_done', ({ id, matchId }) => {
     refreshMe();
-    if (id === S.draftId) { toast(`Týmy jsou hotové – zápas #${matchId}`, 'success'); setTimeout(() => { if (S.draftId === id) location.hash = `#/match/${matchId}`; }, 2500); }
+    if (id === S.draftId) setTimeout(() => { if (S.draftId === id) location.hash = `#/match/${matchId}`; }, 2500);
   });
   socket.on('match_update', ({ id }) => { refreshMe(); if (String(id) === String(S.matchId)) viewMatch(String(id)); });
-  socket.on('matches_changed', () => { if (route().name === 'home' && S.me) loadSidePanel(); });
+  socket.on('matches_changed', () => { if (route().name === 'home' && S.me) loadLive(); });
   socket.on('connect', () => {
     if (S.draftId) emit('draft_join', { id: S.draftId }).then((r) => { if (r?.state) { S.draft = r.state; S.chat = r.chat; renderDraft(); renderChat(); } });
     if (S.matchId) emit('match_join', { id: S.matchId });
@@ -626,7 +666,7 @@
   (async () => {
     S.config = await api('/api/config');
     await refreshMe();
-    if (new URLSearchParams(location.search).get('error') === 'oauth') toast('Přihlášení přes Discord se nezdařilo.', 'error');
+    if (new URLSearchParams(location.search).get('error') === 'oauth') toast('Přihlášení přes Discord se nezdařilo', 'error');
     if (S.status?.draft && route().name === 'home') location.hash = `#/draft/${S.status.draft}`;
     render();
   })();

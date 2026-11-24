@@ -39,6 +39,8 @@ V `.env` nastav `DEV_LOGIN=true` (a třeba `PICK_SECONDS=15`), spusť server a v
 node scripts/simulate.js        # 9 botů – ty se připoj na SUPPORT jako 10. hráč
 node scripts/simulate.js 10     # 10 botů – celý flow proběhne sám
 node scripts/make-test-rofl.js 1 RED   # falešný .rofl pro zápas #1 (vyhrál RED)
+PASSIVE=1 node scripts/simulate.js 9   # boti v draftu nevolí – můžeš draftovat ručně
+OFFSET=7 node scripts/simulate.js 3    # přidá jen Bot8–Bot10 (ADC, 2× SUPPORT)
 ```
 Testovacího hráče přihlásíš přes `http://localhost:3000/auth/dev?name=Jmeno`.
 

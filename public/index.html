@@ -3,15 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15161A">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <title>INHOUSE</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="preload" href="/fonts/onest-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/unbounded-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <nav class="nav">
     <div class="nav-inner">
-      <a href="#/" class="logo">IN<span>HOUSE</span></a>
+      <a href="#/" class="logo" aria-label="INHOUSE – fronta">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <span>inhouse</span>
+      </a>
       <div class="nav-links">
         <a href="#/" data-nav="home">Fronta</a>
         <a href="#/matches" data-nav="matches">Zápasy</a>
@@ -20,10 +25,10 @@
       <div id="nav-user" class="nav-user"></div>
     </div>
   </nav>
-  <div id="banner"></div>
   <main id="app" class="container"></main>
+  <div id="dock"></div>
   <div id="modal-root"></div>
-  <div id="toasts"></div>
+  <div id="toasts" aria-live="polite"></div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/app.js"></script>
 </body>

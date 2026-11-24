@@ -5,6 +5,8 @@
 const { io } = require('socket.io-client');
 
 const COUNT = Number(process.argv[2]) || 9;
+const OFFSET = Number(process.env.OFFSET) || 0;   // OFFSET=7 → začne Bot8 (ADC)
+const PASSIVE = process.env.PASSIVE === '1';      // boti v draftu nevolí (můžeš draftovat za ně v prohlížeči)
 const BASE = process.argv[3] || process.env.BASE_URL || 'http://localhost:3000';
 const ROLES = ['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPPORT'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -20,7 +22,7 @@ async function bot(i) {
   const done = new Set();
 
   const act = (st) => {
-    if (!st || st.phase === 'done' || st.captains[st.actor].id !== me.id) return;
+    if (PASSIVE || !st || st.phase === 'done' || st.captains[st.actor].id !== me.id) return;
     const key = `${st.phase}-${st.round}`;
     if (done.has(key)) return;
     done.add(key);
@@ -44,6 +46,6 @@ async function bot(i) {
 }
 
 (async () => {
-  for (let i = 0; i < COUNT; i++) { await bot(i); await sleep(150); }
+  for (let i = OFFSET; i < OFFSET + COUNT; i++) { await bot(i); await sleep(150); }
   console.log(`${COUNT} botů běží. Ctrl+C pro ukončení.`);
 })().catch((e) => { console.error(e.message); process.exit(1); });
